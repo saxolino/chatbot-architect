@@ -57,13 +57,13 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Formato messaggi non valido' });
     }
 
-    // Controlla se l'utente sta chiedendo di prodotti
     const userMessage = messages[messages.length - 1].content.toLowerCase();
     const productSearchKeywords = [
       'prodotto', 'prodotti', 'materiale', 'materiali', 
       'cerca', 'trovare', 'mostrami', 'consigli',
       'sedia', 'tavolo', 'lampada', 'divano', 'parquet',
-      'mattone', 'finestra', 'porta', 'isolante', 'sanitario'
+      'mattone', 'finestra', 'porta', 'isolante', 'sanitario',
+      'poltrona', 'poltrone'
     ];
     
     const isProductSearch = productSearchKeywords.some(keyword => 
@@ -71,18 +71,23 @@ app.post('/api/chat', async (req, res) => {
     );
     
     if (isProductSearch) {
-      // Cerca prodotti (testuale e semantico)
       const foundProducts = await searchProducts(userMessage);
       
       if (foundProducts.length > 0) {
-        // Risposta AI con suggerimento di prodotti
+        // Miglioriamo il prompt per OpenAI
         const completion = await openai.chat.completions.create({
           model: "gpt-4",
           messages: [
+            {
+              role: "system",
+              content: `Sei un esperto di design e architettura. Analizza i prodotti trovati e rispondi alla domanda dell'utente in modo specifico e dettagliato, facendo riferimento ai prodotti disponibili. Non limitarti a una risposta generica.`
+            },
             ...messages,
             {
               role: "system",
-              content: `Ho trovato ${foundProducts.length} prodotti che potrebbero interessare l'utente. Descrivi brevemente questi prodotti nell'ambito dell'architettura, facendo riferimento alle loro caratteristiche. Non elencare tutti i dettagli tecnici, verranno mostrati all'utente in un'interfaccia separata.`
+              content: `Ho trovato ${foundProducts.length} prodotti pertinenti. Ecco i dettagli: ${
+                foundProducts.map(p => `${p.name} (${p.category}) di ${p.manufacturer}: ${p.short_description}`).join('. ')
+              }`
             }
           ]
         });
@@ -156,21 +161,32 @@ app.delete('/api/moodboard/unpin/:id', (req, res) => {
 
 // Funzione per cercare prodotti
 async function searchProducts(query) {
-  // Ricerca testuale semplice
+  // Ricerca testuale più precisa
   const textResults = products.filter(product => {
     const searchableText = `${product.name} ${product.description} ${product.category} 
                           ${product.manufacturer} ${product.materials} ${product.tags.join(' ')}`.toLowerCase();
-    return query.toLowerCase().split(' ').some(word => 
-      word.length > 2 && searchableText.includes(word)
-    );
+    
+    // Dividi la query in parole e cerca corrispondenze esatte
+    const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 2);
+    return queryWords.every(word => searchableText.includes(word));
   });
-  
+
   // Ricerca semantica con OpenAI Embeddings
   const semanticResults = await getSemanticResults(query, products);
   
-  // Unisci i risultati, rimuovi duplicati e limita a 10
+  // Unisci i risultati dando priorità ai risultati testuali esatti
   const combinedResults = [...new Set([...textResults, ...semanticResults])];
-  return combinedResults.slice(0, 10);
+  
+  // Ordina i risultati mettendo prima quelli che corrispondono esattamente alla categoria cercata
+  return combinedResults
+    .sort((a, b) => {
+      const aMatchesCategory = a.category.toLowerCase().includes(query.toLowerCase());
+      const bMatchesCategory = b.category.toLowerCase().includes(query.toLowerCase());
+      if (aMatchesCategory && !bMatchesCategory) return -1;
+      if (!aMatchesCategory && bMatchesCategory) return 1;
+      return 0;
+    })
+    .slice(0, 10);
 }
 
 // Implementazione della ricerca semantica con OpenAI
