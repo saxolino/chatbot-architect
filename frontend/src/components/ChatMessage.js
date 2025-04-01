@@ -1,6 +1,7 @@
 import React from 'react';
 
-const ChatMessage = ({ isUser, message, loading }) => {
+const ChatMessage = ({ message, loading }) => {
+  const isUser = message.role === 'user';
   const messageClasses = isUser 
     ? "bg-brand-accent/20 text-brand-text rounded-tr-lg rounded-tl-lg rounded-bl-lg"
     : "bg-brand-bg border border-brand-accent/20 shadow-sm text-brand-text rounded-tr-lg rounded-tl-lg rounded-br-lg";
@@ -16,7 +17,7 @@ const ChatMessage = ({ isUser, message, loading }) => {
           </div>
         ) : (
           <div className="p-4">
-            {message}
+            {message.content}
           </div>
         )}
       </div>
