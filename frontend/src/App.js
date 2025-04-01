@@ -9,17 +9,19 @@ import { sendMessage } from './services/api';
 
 function App() {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: 'Ciao! Sono il tuo assistente virtuale per l\'architettura. Come posso aiutarti oggi?' }
+    { 
+      role: 'assistant', 
+      content: 'Ciao! Sono il tuo assistente virtuale per l\'architettura. Come posso aiutarti oggi?' 
+    }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'moodboard'
+  const [activeTab, setActiveTab] = useState('chat');
   const [foundProducts, setFoundProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [pinnedItems, setPinnedItems] = useState([]);
   const messagesEndRef = useRef(null);
 
-  // Scorrimento automatico ai messaggi più recenti
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -28,19 +30,19 @@ function App() {
     e.preventDefault();
     if (input.trim() === '') return;
 
-    const userMessage = { role: 'user', content: input };
+    const userMessage = { role: 'user', content: input.trim() };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
     try {
-      // Qui utilizziamo il servizio API per inviare messaggi
       const response = await sendMessage([...messages, userMessage]);
       
-      // Aggiungiamo la risposta dell'assistente
-      setMessages(prev => [...prev, { role: 'assistant', content: response.reply }]);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: response.reply 
+      }]);
       
-      // Se ci sono prodotti trovati, li mostriamo
       if (response.products && response.products.length > 0) {
         setFoundProducts(response.products);
       }
@@ -125,18 +127,15 @@ function App() {
                   {messages.map((message, index) => (
                     <ChatMessage 
                       key={index} 
-                      message={message} 
-                      isLastMessage={index === messages.length - 1 && message.role === 'assistant'}
+                      message={message}
+                      loading={false}
                     />
                   ))}
                   {isLoading && (
-                    <div className="message message-bot">
-                      <div className="flex space-x-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-accent animate-bounce"></div>
-                        <div className="w-2 h-2 rounded-full bg-brand-accent animate-bounce delay-100"></div>
-                        <div className="w-2 h-2 rounded-full bg-brand-accent animate-bounce delay-200"></div>
-                      </div>
-                    </div>
+                    <ChatMessage 
+                      message={{ role: 'assistant', content: '' }}
+                      loading={true}
+                    />
                   )}
                   <div ref={messagesEndRef} />
                 </div>
