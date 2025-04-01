@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Debug - Chatbot Architect</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background-color: #070156;
+      color: #ffffff;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      color: #4ddbd4;
+    }
+    button {
+      background-color: #4ddbd4;
+      color: #070156;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px 0;
+    }
+    pre {
+      background-color: rgba(255,255,255,0.1);
+      padding: 10px;
+      border-radius: 4px;
+      overflow: auto;
+      max-height: 300px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Debug - Chatbot Architect</h1>
+  
+  <div>
+    <p>URL API Backend: <span id="apiUrl">-</span></p>
+    <button onclick="testBackend()">Test connessione backend</button>
+    <div id="backendResult"></div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+      document.getElementById('apiUrl').textContent = apiUrl;
+    });
+
+    async function testBackend() {
+      const resultElement = document.getElementById('backendResult');
+      resultElement.innerHTML = '<p>Connessione in corso...</p>';
+      
+      try {
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+        const response = await fetch(`${apiUrl}/products/1`);
+        
+        if (!response.ok) {
+          throw new Error(`Errore HTTP: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        resultElement.innerHTML = '<p style="color: #4ddbd4">✅ Connessione riuscita!</p>' +
+                                '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+      } catch (error) {
+        resultElement.innerHTML = '<p style="color: red">❌ Errore di connessione: ' + error.message + '</p>';
+        console.error('Errore test backend:', error);
+      }
+    }
+  </script>
+</body>
+</html> 

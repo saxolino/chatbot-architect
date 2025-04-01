@@ -2,6 +2,7 @@ import axios from 'axios';
 
 // URL base dell'API
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+console.log('API_URL configurato:', API_URL);
 
 // Crea un'istanza di axios con configurazione di base
 const api = axios.create({
@@ -10,6 +11,24 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Interceptor per loggare le richieste
+api.interceptors.request.use(request => {
+  console.log('Richiesta in uscita:', request);
+  return request;
+});
+
+// Interceptor per loggare le risposte
+api.interceptors.response.use(
+  response => {
+    console.log('Risposta ricevuta:', response);
+    return response;
+  },
+  error => {
+    console.error('Errore nella richiesta:', error.response || error);
+    return Promise.reject(error);
+  }
+);
 
 /**
  * Invia un messaggio alla chat e ottiene una risposta

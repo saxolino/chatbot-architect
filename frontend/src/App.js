@@ -16,7 +16,9 @@ import { MdMoodboard } from 'react-icons/md';
 const Message = React.memo(({ message, onAddToMoodboard }) => {
   const renderContent = useCallback(() => {
     try {
+      console.log('Contenuto messaggio:', message.content); // Debug
       const content = JSON.parse(message.content);
+      console.log('Contenuto parsato:', content); // Debug
       if (content.type === 'product_list' || content.type === 'product_suggestion') {
         return (
           <div className="message-content">
@@ -34,6 +36,7 @@ const Message = React.memo(({ message, onAddToMoodboard }) => {
         );
       }
     } catch (e) {
+      console.error('Errore parsing:', e); // Debug
       return <p className="message-text">{message.content}</p>;
     }
     return <p className="message-text">{message.content}</p>;
