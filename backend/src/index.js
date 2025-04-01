@@ -58,6 +58,31 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const userMessage = messages[messages.length - 1].content.toLowerCase();
+    
+    // Verifica se l'utente sta chiedendo di vedere tutti i prodotti
+    if (userMessage.match(/mostrami (tutti )?i prodotti|che prodotti (hai|avete|ci sono)/i)) {
+      // Raggruppa i prodotti per categoria
+      const productsByCategory = products.reduce((acc, product) => {
+        if (!acc[product.category]) {
+          acc[product.category] = [];
+        }
+        acc[product.category].push(product);
+        return acc;
+      }, {});
+
+      // Crea una risposta strutturata
+      const response = "Ecco i prodotti disponibili nel nostro catalogo, organizzati per categoria:\n\n" +
+        Object.entries(productsByCategory)
+          .map(([category, prods]) => 
+            `${category}:\n${prods.map(p => `- ${p.name} (${p.manufacturer})`).join('\n')}`)
+          .join('\n\n');
+
+      return res.json({
+        reply: response,
+        products: products.slice(0, 10) // Mostra i primi 10 prodotti nella sidebar
+      });
+    }
+
     const productSearchKeywords = [
       'prodotto', 'prodotti', 'materiale', 'materiali', 
       'cerca', 'trovare', 'mostrami', 'consigli',
@@ -74,18 +99,21 @@ app.post('/api/chat', async (req, res) => {
       const foundProducts = await searchProducts(userMessage);
       
       if (foundProducts.length > 0) {
-        // Miglioriamo il prompt per OpenAI
         const completion = await openai.chat.completions.create({
           model: "gpt-4",
           messages: [
             {
               role: "system",
-              content: `Sei un esperto di design e architettura. Analizza i prodotti trovati e rispondi alla domanda dell'utente in modo specifico e dettagliato, facendo riferimento ai prodotti disponibili. Non limitarti a una risposta generica.`
+              content: `Sei un esperto di design e architettura che lavora con un catalogo specifico di prodotti. 
+                       Analizza i prodotti trovati e rispondi alla domanda dell'utente in modo specifico e dettagliato, 
+                       facendo riferimento SOLO ai prodotti disponibili nel nostro catalogo. 
+                       NON suggerire prodotti che non sono nel nostro catalogo.
+                       Se l'utente chiede di vedere tutti i prodotti, suggerigli di scrivere "mostrami i prodotti".`
             },
             ...messages,
             {
               role: "system",
-              content: `Ho trovato ${foundProducts.length} prodotti pertinenti. Ecco i dettagli: ${
+              content: `Ho trovato ${foundProducts.length} prodotti pertinenti nel nostro catalogo. Ecco i dettagli: ${
                 foundProducts.map(p => `${p.name} (${p.category}) di ${p.manufacturer}: ${p.short_description}`).join('. ')
               }`
             }
@@ -105,7 +133,10 @@ app.post('/api/chat', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: "Sei un assistente AI specializzato in architettura e design. Rispondi come un esperto del settore, offrendo consigli pratici e suggerimenti per materiali, fornitori e soluzioni progettuali."
+          content: `Sei un assistente AI specializzato in architettura e design. 
+                   Rispondi come un esperto del settore, offrendo consigli pratici e suggerimenti.
+                   Se l'utente chiede informazioni sui prodotti, ricordagli che può vedere il catalogo 
+                   completo scrivendo "mostrami i prodotti".`
         },
         ...messages
       ]
