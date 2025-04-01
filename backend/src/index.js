@@ -26,7 +26,27 @@ let products = [];
 // Cache per gli embedding dei prodotti
 let productEmbeddings = {};
 
-// Endpoint API
+// Route di test
+app.get('/api', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    message: 'Server attivo',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Route di test per i prodotti
+app.get('/api/test', async (req, res) => {
+  try {
+    res.json({ 
+      status: 'ok',
+      productsLoaded: products.length,
+      firstProduct: products[0] || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Errore nel test' });
+  }
+});
 
 // Endpoint per la chat
 app.post('/api/chat', async (req, res) => {
