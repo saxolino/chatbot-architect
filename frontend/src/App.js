@@ -12,34 +12,6 @@ import { BsGrid, BsChatSquareText, BsHouse, BsBarChart, BsGear } from 'react-ico
 import { MdMoodboard } from 'react-icons/md';
 // Successivamente, importeremo il logo qui: import Logo from './assets/logo.png';
 
-// Componente ottimizzato per le card dei prodotti
-const ProductCard = React.memo(({ product, onAddToMoodboard }) => {
-  const handleClick = useCallback(() => {
-    onAddToMoodboard(product);
-  }, [product, onAddToMoodboard]);
-
-  return (
-    <div className="product-card" onClick={handleClick}>
-      <img 
-        src={product.image_url} 
-        alt={product.name} 
-        className="product-image"
-        loading="lazy"
-      />
-      <div className="product-info">
-        <h3 className="product-name">{product.name}</h3>
-        <p className="product-manufacturer">{product.manufacturer}</p>
-        <p className="product-description">{product.description}</p>
-        <div className="product-tags">
-          {product.tags?.map((tag, index) => (
-            <span key={index} className="product-tag">{tag}</span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-});
-
 // Componente ottimizzato per i messaggi
 const Message = React.memo(({ message, onAddToMoodboard }) => {
   const renderContent = useCallback(() => {
