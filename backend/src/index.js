@@ -11,7 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000']
+}));
 app.use(express.json());
 
 // Configurazione OpenAI
@@ -21,6 +23,8 @@ const openai = new OpenAI({
 
 // Carica il database dei prodotti
 let products = [];
+// Cache per gli embedding dei prodotti
+let productEmbeddings = {};
 
 // Endpoint API
 
@@ -141,9 +145,7 @@ async function searchProducts(query) {
     );
   });
   
-  // Ricerca semantica (simulata in questo esempio)
-  // In un'implementazione reale, qui si utilizzerebbe OpenAI Embeddings 
-  // e una ricerca di similarità vettoriale
+  // Ricerca semantica con OpenAI Embeddings
   const semanticResults = await getSemanticResults(query, products);
   
   // Unisci i risultati, rimuovi duplicati e limita a 10
@@ -151,27 +153,63 @@ async function searchProducts(query) {
   return combinedResults.slice(0, 10);
 }
 
+// Implementazione della ricerca semantica con OpenAI
 async function getSemanticResults(query, productList) {
   try {
     // Genera embedding per la query
-    const embedding = await openai.embeddings.create({
+    const queryEmbeddingResponse = await openai.embeddings.create({
       model: "text-embedding-ada-002",
       input: query,
     });
     
-    const queryEmbedding = embedding.data[0].embedding;
+    const queryEmbedding = queryEmbeddingResponse.data[0].embedding;
     
-    // Per semplicità, calcoliamo la similarità qui
-    // In un'app reale questo verrebbe fatto nel database
-    const results = productList.map(product => {
-      // Se il prodotto non ha un embedding, usiamo un valore di similarità casuale per esempio
-      // In un'app reale, tutti i prodotti avrebbero embeddings pre-calcolati
-      const similarity = Math.random(); // Simulato per questo esempio
-      return { product, similarity };
-    });
+    // Array per memorizzare i prodotti con le loro similarità
+    let productsWithSimilarity = [];
+    
+    // Processa ogni prodotto
+    for (const product of productList) {
+      // Ottieni o genera l'embedding del prodotto
+      let productEmbedding;
+      
+      if (productEmbeddings[product.id]) {
+        // Usa l'embedding cached
+        productEmbedding = productEmbeddings[product.id];
+      } else {
+        // Combina i campi rilevanti per generare un embedding migliore
+        const textToEmbed = `${product.name}. ${product.short_description} ${product.description}. 
+                            Categoria: ${product.category}. Materiali: ${product.materials}. 
+                            Produttore: ${product.manufacturer}. ${product.tags.join(', ')}`;
+        
+        // Genera l'embedding
+        try {
+          const productEmbeddingResponse = await openai.embeddings.create({
+            model: "text-embedding-ada-002",
+            input: textToEmbed,
+          });
+          
+          productEmbedding = productEmbeddingResponse.data[0].embedding;
+          
+          // Cache l'embedding per usi futuri
+          productEmbeddings[product.id] = productEmbedding;
+          
+          // Piccola pausa per evitare di superare i rate limit dell'API
+          await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (error) {
+          console.error(`Errore nel generare l'embedding per il prodotto ${product.id}:`, error);
+          continue; // Salta questo prodotto
+        }
+      }
+      
+      // Calcola la similarità con la query
+      const similarity = calculateSimilarity(queryEmbedding, productEmbedding);
+      
+      // Aggiungi il prodotto con la sua similarità
+      productsWithSimilarity.push({ product, similarity });
+    }
     
     // Ordina per similarità e prendi i top 5
-    return results
+    return productsWithSimilarity
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 5)
       .map(item => item.product);
