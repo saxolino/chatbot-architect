@@ -59,8 +59,33 @@ app.post('/api/chat', async (req, res) => {
 
     const userMessage = messages[messages.length - 1].content.toLowerCase();
     
+    // Prima analizziamo il messaggio con GPT per capire l'intento dell'utente
+    const intentAnalysis = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: `Analizza il messaggio dell'utente e determina se sta cercando informazioni sui prodotti.
+                   Rispondi solo con "true" o "false".
+                   Esempi di richieste prodotti:
+                   - Domande dirette sui prodotti ("che sedie avete?")
+                   - Domande indirette ("vorrei arredare il soggiorno")
+                   - Richieste di consigli ("cosa mi consigli per l'illuminazione?")
+                   - Domande su materiali o stili ("hai qualcosa in legno?")
+                   - Richieste di confronto ("qual è meglio tra...")
+                   - Domande su caratteristiche ("hai prodotti per esterni?")`
+        },
+        {
+          role: "user",
+          content: userMessage
+        }
+      ]
+    });
+
+    const isProductRelated = intentAnalysis.choices[0].message.content.trim().toLowerCase() === 'true';
+    
     // Verifica se l'utente sta chiedendo di vedere tutti i prodotti
-    if (userMessage.match(/mostrami (tutti )?i prodotti|che prodotti (hai|avete|ci sono)/i)) {
+    if (userMessage.match(/mostrami (tutti )?i prodotti|che prodotti (hai|avete|ci sono)|catalogo|lista( dei)? prodotti/i)) {
       // Raggruppa i prodotti per categoria
       const productsByCategory = products.reduce((acc, product) => {
         if (!acc[product.category]) {
@@ -79,43 +104,64 @@ app.post('/api/chat', async (req, res) => {
 
       return res.json({
         reply: response,
-        products: products.slice(0, 10) // Mostra i primi 10 prodotti nella sidebar
+        products: products.slice(0, 10)
       });
     }
 
-    const productSearchKeywords = [
-      'prodotto', 'prodotti', 'materiale', 'materiali', 
-      'cerca', 'trovare', 'mostrami', 'consigli',
-      'sedia', 'tavolo', 'lampada', 'divano', 'parquet',
-      'mattone', 'finestra', 'porta', 'isolante', 'sanitario',
-      'poltrona', 'poltrone'
-    ];
-    
-    const isProductSearch = productSearchKeywords.some(keyword => 
-      userMessage.includes(keyword)
-    );
-    
-    if (isProductSearch) {
-      const foundProducts = await searchProducts(userMessage);
+    if (isProductRelated) {
+      // Usa GPT per generare una query di ricerca ottimizzata
+      const searchQueryAnalysis = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: [
+          {
+            role: "system",
+            content: `Analizza il messaggio dell'utente ed estrai le parole chiave più rilevanti per la ricerca di prodotti.
+                     Considera: categorie, materiali, stili, utilizzi, caratteristiche.
+                     Rispondi solo con le parole chiave separate da spazio.`
+          },
+          {
+            role: "user",
+            content: userMessage
+          }
+        ]
+      });
+
+      const searchQuery = searchQueryAnalysis.choices[0].message.content.trim();
+      const foundProducts = await searchProducts(searchQuery);
       
       if (foundProducts.length > 0) {
+        // Miglioriamo il prompt per la risposta
         const completion = await openai.chat.completions.create({
           model: "gpt-4",
           messages: [
             {
               role: "system",
-              content: `Sei un esperto di design e architettura che lavora con un catalogo specifico di prodotti. 
-                       Analizza i prodotti trovati e rispondi alla domanda dell'utente in modo specifico e dettagliato, 
-                       facendo riferimento SOLO ai prodotti disponibili nel nostro catalogo. 
-                       NON suggerire prodotti che non sono nel nostro catalogo.
-                       Se l'utente chiede di vedere tutti i prodotti, suggerigli di scrivere "mostrami i prodotti".`
+              content: `Sei un esperto di design e architettura che conosce perfettamente il catalogo prodotti.
+                       
+                       Linee guida per la risposta:
+                       1. Analizza attentamente la domanda dell'utente
+                       2. Fai riferimento SOLO ai prodotti trovati nel catalogo
+                       3. Spiega perché i prodotti suggeriti sono adatti
+                       4. Se pertinente, suggerisci combinazioni di prodotti
+                       5. Menziona caratteristiche specifiche e materiali
+                       6. Se la domanda è vaga, fai domande per capire meglio le esigenze
+                       7. Se mancano prodotti rilevanti, suggerisci di vedere il catalogo completo
+                       
+                       NON suggerire mai prodotti che non sono nel nostro catalogo.`
             },
             ...messages,
             {
               role: "system",
-              content: `Ho trovato ${foundProducts.length} prodotti pertinenti nel nostro catalogo. Ecco i dettagli: ${
-                foundProducts.map(p => `${p.name} (${p.category}) di ${p.manufacturer}: ${p.short_description}`).join('. ')
-              }`
+              content: `Ho trovato ${foundProducts.length} prodotti pertinenti nel nostro catalogo. 
+                       
+                       Dettagli prodotti:
+                       ${foundProducts.map(p => 
+                         `- ${p.name} (${p.category})
+                          Produttore: ${p.manufacturer}
+                          Descrizione: ${p.short_description}
+                          Materiali: ${p.materials}
+                          Tags: ${p.tags.join(', ')}`
+                       ).join('\n\n')}`
             }
           ]
         });
@@ -133,10 +179,14 @@ app.post('/api/chat', async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `Sei un assistente AI specializzato in architettura e design. 
-                   Rispondi come un esperto del settore, offrendo consigli pratici e suggerimenti.
-                   Se l'utente chiede informazioni sui prodotti, ricordagli che può vedere il catalogo 
-                   completo scrivendo "mostrami i prodotti".`
+          content: `Sei un assistente AI specializzato in architettura e design che conosce il catalogo prodotti.
+                   
+                   Linee guida:
+                   1. Rispondi come un esperto del settore
+                   2. Se la domanda potrebbe essere correlata a prodotti, suggerisci di esplorare il catalogo
+                   3. Puoi suggerire di vedere il catalogo completo scrivendo "mostrami i prodotti"
+                   4. Puoi suggerire di fare domande specifiche sui prodotti per ricevere consigli mirati
+                   5. Mantieni sempre un tono professionale ma amichevole`
         },
         ...messages
       ]
@@ -197,9 +247,14 @@ async function searchProducts(query) {
     const searchableText = `${product.name} ${product.description} ${product.category} 
                           ${product.manufacturer} ${product.materials} ${product.tags.join(' ')}`.toLowerCase();
     
-    // Dividi la query in parole e cerca corrispondenze esatte
+    // Dividi la query in parole e cerca corrispondenze parziali
     const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 2);
-    return queryWords.every(word => searchableText.includes(word));
+    return queryWords.some(word => {
+      // Cerca corrispondenze esatte o parziali
+      return searchableText.includes(word) || 
+             product.tags.some(tag => tag.toLowerCase().includes(word)) ||
+             product.category.toLowerCase().includes(word);
+    });
   });
 
   // Ricerca semantica con OpenAI Embeddings
@@ -208,14 +263,30 @@ async function searchProducts(query) {
   // Unisci i risultati dando priorità ai risultati testuali esatti
   const combinedResults = [...new Set([...textResults, ...semanticResults])];
   
-  // Ordina i risultati mettendo prima quelli che corrispondono esattamente alla categoria cercata
+  // Ordina i risultati per rilevanza
   return combinedResults
     .sort((a, b) => {
-      const aMatchesCategory = a.category.toLowerCase().includes(query.toLowerCase());
-      const bMatchesCategory = b.category.toLowerCase().includes(query.toLowerCase());
-      if (aMatchesCategory && !bMatchesCategory) return -1;
-      if (!aMatchesCategory && bMatchesCategory) return 1;
-      return 0;
+      // Calcola un punteggio di rilevanza per ogni prodotto
+      const getRelevanceScore = (product) => {
+        let score = 0;
+        const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 2);
+        
+        // Punti per corrispondenza nella categoria
+        if (product.category.toLowerCase().includes(query.toLowerCase())) score += 3;
+        
+        // Punti per corrispondenza nei tag
+        product.tags.forEach(tag => {
+          if (queryWords.some(word => tag.toLowerCase().includes(word))) score += 2;
+        });
+        
+        // Punti per corrispondenza nel nome o descrizione
+        if (product.name.toLowerCase().includes(query.toLowerCase())) score += 2;
+        if (product.description.toLowerCase().includes(query.toLowerCase())) score += 1;
+        
+        return score;
+      };
+      
+      return getRelevanceScore(b) - getRelevanceScore(a);
     })
     .slice(0, 10);
 }
