@@ -78,9 +78,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [products, setProducts] = useState([]);
   const [moodboard, setMoodboard] = useState([]);
-  const [showMoodboard, setShowMoodboard] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -112,7 +110,6 @@ function App() {
     try {
       const response = await sendMessage([...messages, { role: 'user', content: userMessage }]);
       setMessages(prev => [...prev, { role: 'assistant', content: response.reply }]);
-      setProducts(response.products || []);
     } catch (error) {
       console.error('Errore nell\'invio del messaggio:', error);
       setMessages(prev => [...prev, { 
@@ -122,10 +119,6 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const toggleMoodboard = () => {
-    setShowMoodboard(!showMoodboard);
   };
 
   const addToMoodboard = useCallback((product) => {
@@ -157,25 +150,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* Sidebar sinistra - Prodotti */}
-      <div className="products-sidebar">
-        <div className="products-header">
-          <h2 className="products-title">Prodotti</h2>
-        </div>
-        <div className="products-list">
-          {products.map(product => (
-            <div key={product.id} className="product-card" onClick={() => addToMoodboard(product)}>
-              <img src={product.image_url} alt={product.name} className="product-image" />
-              <div className="product-info">
-                <h3 className="product-name">{product.name}</h3>
-                <p className="product-category">{product.category}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Area centrale - Chat */}
       <div className="chat-container">
         <div className="chat-header">
           <h2 className="chat-title">Chat</h2>
@@ -216,7 +190,6 @@ function App() {
         </div>
       </div>
 
-      {/* Sidebar destra - Moodboard */}
       <div className="moodboard-sidebar">
         <div className="moodboard-header">
           <h2 className="moodboard-title">Moodboard</h2>
