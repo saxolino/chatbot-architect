@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000']
+  origin: ['https://architect-chatbot-frontend.onrender.com', 'http://localhost:3000']
 }));
 app.use(express.json());
 
