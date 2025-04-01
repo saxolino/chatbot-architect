@@ -26,6 +26,11 @@ let products = [];
 // Cache per gli embedding dei prodotti
 let productEmbeddings = {};
 
+// Cache per gli embedding e le risposte
+const embeddingCache = new Map();
+const responseCache = new Map();
+const CACHE_DURATION = 3600000; // 1 ora in millisecondi
+
 // Route di test
 app.get('/api', (req, res) => {
   res.json({ 
@@ -48,7 +53,12 @@ app.get('/api/test', async (req, res) => {
   }
 });
 
-// Endpoint per la chat
+// Funzione per generare una chiave di cache
+function generateCacheKey(messages) {
+  return messages.map(m => `${m.role}:${m.content}`).join('|');
+}
+
+// Endpoint per la chat ottimizzato
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages } = req.body;
@@ -58,144 +68,118 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const userMessage = messages[messages.length - 1].content.toLowerCase();
+    const cacheKey = generateCacheKey(messages);
+
+    // Controlla se abbiamo una risposta in cache
+    const cachedResponse = responseCache.get(cacheKey);
+    if (cachedResponse) {
+      return res.json(cachedResponse);
+    }
     
-    // Prima analizziamo il messaggio con GPT per capire l'intento dell'utente
+    // Verifica se l'utente sta chiedendo di vedere tutti i prodotti
+    if (userMessage.match(/mostrami (tutti )?i prodotti|che prodotti (hai|avete|ci sono)|catalogo|lista( dei)? prodotti/i)) {
+      const response = {
+        type: 'product_list',
+        message: 'Ecco i prodotti disponibili nel nostro catalogo:',
+        products: products.map(product => ({
+          id: product.id,
+          name: product.name,
+          manufacturer: product.manufacturer,
+          category: product.category,
+          description: product.short_description,
+          image_url: product.image_url,
+          materials: product.materials,
+          tags: product.tags
+        }))
+      };
+
+      const jsonResponse = {
+        reply: JSON.stringify(response),
+        products: response.products
+      };
+
+      // Cache la risposta
+      responseCache.set(cacheKey, jsonResponse);
+      setTimeout(() => responseCache.delete(cacheKey), CACHE_DURATION);
+
+      return res.json(jsonResponse);
+    }
+
+    // Analisi dell'intento più veloce con prompt ottimizzato
     const intentAnalysis = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4-turbo-preview",
       messages: [
         {
           role: "system",
-          content: `Analizza il messaggio dell'utente e determina se sta cercando informazioni sui prodotti.
-                   Rispondi solo con "true" o "false".
-                   Esempi di richieste prodotti:
-                   - Domande dirette sui prodotti ("che sedie avete?")
-                   - Domande indirette ("vorrei arredare il soggiorno")
-                   - Richieste di consigli ("cosa mi consigli per l'illuminazione?")
-                   - Domande su materiali o stili ("hai qualcosa in legno?")
-                   - Richieste di confronto ("qual è meglio tra...")
-                   - Domande su caratteristiche ("hai prodotti per esterni?")`
+          content: "Rispondi solo 'true' se il messaggio riguarda prodotti, 'false' altrimenti."
         },
         {
           role: "user",
           content: userMessage
         }
-      ]
+      ],
+      temperature: 0.1,
+      max_tokens: 5
     });
 
     const isProductRelated = intentAnalysis.choices[0].message.content.trim().toLowerCase() === 'true';
     
-    // Verifica se l'utente sta chiedendo di vedere tutti i prodotti
-    if (userMessage.match(/mostrami (tutti )?i prodotti|che prodotti (hai|avete|ci sono)|catalogo|lista( dei)? prodotti/i)) {
-      // Raggruppa i prodotti per categoria
-      const productsByCategory = products.reduce((acc, product) => {
-        if (!acc[product.category]) {
-          acc[product.category] = [];
-        }
-        acc[product.category].push(product);
-        return acc;
-      }, {});
-
-      // Crea una risposta strutturata
-      const response = "Ecco i prodotti disponibili nel nostro catalogo, organizzati per categoria:\n\n" +
-        Object.entries(productsByCategory)
-          .map(([category, prods]) => 
-            `${category}:\n${prods.map(p => `- ${p.name} (${p.manufacturer})`).join('\n')}`)
-          .join('\n\n');
-
-      return res.json({
-        reply: response,
-        products: products.slice(0, 10)
-      });
-    }
-
     if (isProductRelated) {
-      // Usa GPT per generare una query di ricerca ottimizzata
-      const searchQueryAnalysis = await openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          {
-            role: "system",
-            content: `Analizza il messaggio dell'utente ed estrai le parole chiave più rilevanti per la ricerca di prodotti.
-                     Considera: categorie, materiali, stili, utilizzi, caratteristiche.
-                     Rispondi solo con le parole chiave separate da spazio.`
-          },
-          {
-            role: "user",
-            content: userMessage
-          }
-        ]
-      });
-
-      const searchQuery = searchQueryAnalysis.choices[0].message.content.trim();
-      const foundProducts = await searchProducts(searchQuery);
+      // Ricerca prodotti ottimizzata
+      const searchResults = await searchProducts(userMessage);
       
-      if (foundProducts.length > 0) {
-        // Miglioriamo il prompt per la risposta
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: `Sei un esperto di design e architettura che conosce perfettamente il catalogo prodotti.
-                       
-                       Linee guida per la risposta:
-                       1. Analizza attentamente la domanda dell'utente
-                       2. Fai riferimento SOLO ai prodotti trovati nel catalogo
-                       3. Spiega perché i prodotti suggeriti sono adatti
-                       4. Se pertinente, suggerisci combinazioni di prodotti
-                       5. Menziona caratteristiche specifiche e materiali
-                       6. Se la domanda è vaga, fai domande per capire meglio le esigenze
-                       7. Se mancano prodotti rilevanti, suggerisci di vedere il catalogo completo
-                       
-                       NON suggerire mai prodotti che non sono nel nostro catalogo.`
-            },
-            ...messages,
-            {
-              role: "system",
-              content: `Ho trovato ${foundProducts.length} prodotti pertinenti nel nostro catalogo. 
-                       
-                       Dettagli prodotti:
-                       ${foundProducts.map(p => 
-                         `- ${p.name} (${p.category})
-                          Produttore: ${p.manufacturer}
-                          Descrizione: ${p.short_description}
-                          Materiali: ${p.materials}
-                          Tags: ${p.tags.join(', ')}`
-                       ).join('\n\n')}`
-            }
-          ]
-        });
-        
-        return res.json({
-          reply: completion.choices[0].message.content,
-          products: foundProducts
-        });
+      if (searchResults.length > 0) {
+        const response = {
+          type: 'product_suggestion',
+          message: `Ho trovato ${searchResults.length} prodotti che potrebbero interessarti:`,
+          products: searchResults.map(product => ({
+            id: product.id,
+            name: product.name,
+            manufacturer: product.manufacturer,
+            category: product.category,
+            description: product.short_description,
+            image_url: product.image_url,
+            materials: product.materials,
+            tags: product.tags
+          }))
+        };
+
+        const jsonResponse = {
+          reply: JSON.stringify(response),
+          products: response.products
+        };
+
+        // Cache la risposta
+        responseCache.set(cacheKey, jsonResponse);
+        setTimeout(() => responseCache.delete(cacheKey), CACHE_DURATION);
+
+        return res.json(jsonResponse);
       }
     }
     
-    // Risposta normale della chat
+    // Risposta normale della chat ottimizzata
     const completion = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-4-turbo-preview",
       messages: [
         {
           role: "system",
-          content: `Sei un assistente AI specializzato in architettura e design che conosce il catalogo prodotti.
-                   
-                   Linee guida:
-                   1. Rispondi come un esperto del settore
-                   2. Se la domanda potrebbe essere correlata a prodotti, suggerisci di esplorare il catalogo
-                   3. Puoi suggerire di vedere il catalogo completo scrivendo "mostrami i prodotti"
-                   4. Puoi suggerire di fare domande specifiche sui prodotti per ricevere consigli mirati
-                   5. Mantieni sempre un tono professionale ma amichevole`
+          content: `Sei un assistente esperto in architettura e design. Rispondi in modo conciso e professionale.`
         },
         ...messages
-      ]
+      ],
+      temperature: 0.7
     });
     
-    res.json({ 
+    const jsonResponse = { 
       reply: completion.choices[0].message.content,
       products: [] 
-    });
+    };
+
+    // Cache la risposta
+    responseCache.set(cacheKey, jsonResponse);
+    setTimeout(() => responseCache.delete(cacheKey), CACHE_DURATION);
+
+    res.json(jsonResponse);
     
   } catch (error) {
     console.error('Errore nell\'API chat:', error);
@@ -240,55 +224,38 @@ app.delete('/api/moodboard/unpin/:id', (req, res) => {
   res.json({ success: true, message: 'Prodotto rimosso dalla moodboard' });
 });
 
-// Funzione per cercare prodotti
+// Funzione di ricerca prodotti ottimizzata
 async function searchProducts(query) {
-  // Ricerca testuale più precisa
+  // Normalizza la query
+  const normalizedQuery = query.toLowerCase().trim();
+  
+  // Cerca nella cache degli embedding
+  if (embeddingCache.has(normalizedQuery)) {
+    return embeddingCache.get(normalizedQuery);
+  }
+
+  // Ricerca testuale veloce
   const textResults = products.filter(product => {
-    const searchableText = `${product.name} ${product.description} ${product.category} 
-                          ${product.manufacturer} ${product.materials} ${product.tags.join(' ')}`.toLowerCase();
-    
-    // Dividi la query in parole e cerca corrispondenze parziali
-    const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 2);
-    return queryWords.some(word => {
-      // Cerca corrispondenze esatte o parziali
-      return searchableText.includes(word) || 
-             product.tags.some(tag => tag.toLowerCase().includes(word)) ||
-             product.category.toLowerCase().includes(word);
-    });
+    const searchableText = `${product.name} ${product.category} ${product.tags.join(' ')}`.toLowerCase();
+    return normalizedQuery.split(' ').some(word => searchableText.includes(word));
   });
 
-  // Ricerca semantica con OpenAI Embeddings
+  // Se abbiamo abbastanza risultati testuali, evitiamo la ricerca semantica
+  if (textResults.length >= 5) {
+    embeddingCache.set(normalizedQuery, textResults.slice(0, 10));
+    setTimeout(() => embeddingCache.delete(normalizedQuery), CACHE_DURATION);
+    return textResults.slice(0, 10);
+  }
+
+  // Ricerca semantica solo se necessario
   const semanticResults = await getSemanticResults(query, products);
+  const combinedResults = [...new Set([...textResults, ...semanticResults])].slice(0, 10);
   
-  // Unisci i risultati dando priorità ai risultati testuali esatti
-  const combinedResults = [...new Set([...textResults, ...semanticResults])];
+  // Cache i risultati
+  embeddingCache.set(normalizedQuery, combinedResults);
+  setTimeout(() => embeddingCache.delete(normalizedQuery), CACHE_DURATION);
   
-  // Ordina i risultati per rilevanza
-  return combinedResults
-    .sort((a, b) => {
-      // Calcola un punteggio di rilevanza per ogni prodotto
-      const getRelevanceScore = (product) => {
-        let score = 0;
-        const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 2);
-        
-        // Punti per corrispondenza nella categoria
-        if (product.category.toLowerCase().includes(query.toLowerCase())) score += 3;
-        
-        // Punti per corrispondenza nei tag
-        product.tags.forEach(tag => {
-          if (queryWords.some(word => tag.toLowerCase().includes(word))) score += 2;
-        });
-        
-        // Punti per corrispondenza nel nome o descrizione
-        if (product.name.toLowerCase().includes(query.toLowerCase())) score += 2;
-        if (product.description.toLowerCase().includes(query.toLowerCase())) score += 1;
-        
-        return score;
-      };
-      
-      return getRelevanceScore(b) - getRelevanceScore(a);
-    })
-    .slice(0, 10);
+  return combinedResults;
 }
 
 // Implementazione della ricerca semantica con OpenAI
@@ -379,6 +346,26 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`Server in esecuzione sulla porta ${PORT}`);
   });
+}
+
+// Funzione helper per assegnare emoji alle categorie
+function getCategoryEmoji(category) {
+  const emojiMap = {
+    'Sedie': '🪑',
+    'Tavoli': '🪑',
+    'Illuminazione': '💡',
+    'Divani': '🛋️',
+    'Letti': '🛏️',
+    'Armadi': '🗄️',
+    'Decorazioni': '🎭',
+    'Tappeti': '🏺',
+    'Cucina': '🍳',
+    'Bagno': '🚿',
+    'Outdoor': '🌳',
+    'Ufficio': '💼',
+    'Storage': '📦'
+  };
+  return emojiMap[category] || '📌';
 }
 
 startServer(); 

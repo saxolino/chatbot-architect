@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { ChatBubbleLeftIcon, PaperAirplaneIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import ChatMessage from './components/ChatMessage';
 import ProductCard from './components/ProductCard';
@@ -12,6 +12,68 @@ import { BsGrid, BsChatSquareText, BsHouse, BsBarChart, BsGear } from 'react-ico
 import { MdMoodboard } from 'react-icons/md';
 // Successivamente, importeremo il logo qui: import Logo from './assets/logo.png';
 
+// Componente ottimizzato per le card dei prodotti
+const ProductCard = React.memo(({ product, onAddToMoodboard }) => {
+  const handleClick = useCallback(() => {
+    onAddToMoodboard(product);
+  }, [product, onAddToMoodboard]);
+
+  return (
+    <div className="product-card" onClick={handleClick}>
+      <img 
+        src={product.image_url} 
+        alt={product.name} 
+        className="product-image"
+        loading="lazy"
+      />
+      <div className="product-info">
+        <h3 className="product-name">{product.name}</h3>
+        <p className="product-manufacturer">{product.manufacturer}</p>
+        <p className="product-description">{product.description}</p>
+        <div className="product-tags">
+          {product.tags?.map((tag, index) => (
+            <span key={index} className="product-tag">{tag}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// Componente ottimizzato per i messaggi
+const Message = React.memo(({ message, onAddToMoodboard }) => {
+  const renderContent = useCallback(() => {
+    try {
+      const content = JSON.parse(message.content);
+      if (content.type === 'product_list' || content.type === 'product_suggestion') {
+        return (
+          <div className="message-content">
+            <p className="message-text">{content.message}</p>
+            <div className="products-grid">
+              {content.products.map(product => (
+                <ProductCard 
+                  key={product.id} 
+                  product={product} 
+                  onAddToMoodboard={onAddToMoodboard}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }
+    } catch (e) {
+      return <p className="message-text">{message.content}</p>;
+    }
+    return <p className="message-text">{message.content}</p>;
+  }, [message, onAddToMoodboard]);
+
+  return (
+    <div className={`message ${message.role}-message`}>
+      {renderContent()}
+    </div>
+  );
+});
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -20,14 +82,23 @@ function App() {
   const [moodboard, setMoodboard] = useState([]);
   const [showMoodboard, setShowMoodboard] = useState(false);
   const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      const chatContainer = chatContainerRef.current;
+      const { scrollHeight, clientHeight, scrollTop } = chatContainer;
+      const isScrolledToBottom = scrollHeight - clientHeight <= scrollTop + 100;
+
+      if (isScrolledToBottom) {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,6 +115,10 @@ function App() {
       setProducts(response.products || []);
     } catch (error) {
       console.error('Errore nell\'invio del messaggio:', error);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Mi dispiace, si è verificato un errore. Riprova tra qualche istante.' 
+      }]);
     } finally {
       setLoading(false);
     }
@@ -53,15 +128,32 @@ function App() {
     setShowMoodboard(!showMoodboard);
   };
 
-  const addToMoodboard = (product) => {
-    if (!moodboard.find(item => item.id === product.id)) {
-      setMoodboard(prev => [...prev, product]);
-    }
-  };
+  const addToMoodboard = useCallback((product) => {
+    setMoodboard(prev => {
+      if (!prev.find(item => item.id === product.id)) {
+        return [...prev, product];
+      }
+      return prev;
+    });
+  }, []);
 
-  const removeFromMoodboard = (productId) => {
+  const removeFromMoodboard = useCallback((productId) => {
     setMoodboard(prev => prev.filter(item => item.id !== productId));
-  };
+  }, []);
+
+  const moodboardItems = useMemo(() => (
+    moodboard.map(product => (
+      <div key={product.id} className="moodboard-item">
+        <img src={product.image_url} alt={product.name} loading="lazy" />
+        <button 
+          className="remove-pin"
+          onClick={() => removeFromMoodboard(product.id)}
+        >
+          <FiX size={16} />
+        </button>
+      </div>
+    ))
+  ), [moodboard, removeFromMoodboard]);
 
   return (
     <div className="app-container">
@@ -88,11 +180,13 @@ function App() {
         <div className="chat-header">
           <h2 className="chat-title">Chat</h2>
         </div>
-        <div className="chat-messages">
+        <div className="chat-messages" ref={chatContainerRef}>
           {messages.map((message, index) => (
-            <div key={index} className={`message ${message.role}-message`}>
-              {message.content}
-            </div>
+            <Message 
+              key={index} 
+              message={message} 
+              onAddToMoodboard={addToMoodboard}
+            />
           ))}
           {loading && (
             <div className="loading-indicator">
@@ -128,17 +222,7 @@ function App() {
           <h2 className="moodboard-title">Moodboard</h2>
         </div>
         <div className="moodboard-grid">
-          {moodboard.map(product => (
-            <div key={product.id} className="moodboard-item">
-              <img src={product.image_url} alt={product.name} />
-              <button 
-                className="remove-pin"
-                onClick={() => removeFromMoodboard(product.id)}
-              >
-                <FiX size={16} />
-              </button>
-            </div>
-          ))}
+          {moodboardItems}
         </div>
       </div>
     </div>
